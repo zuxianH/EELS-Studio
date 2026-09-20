@@ -14,7 +14,7 @@ Open http://localhost:8501 (binds to localhost only). Once `.venv` exists, `./ru
 
 ## Usage
 
-- **Load scans** — enter a data folder in the sidebar and select files. Supports 3D `(energy, px, py)` and 6D `(sample, energy, probe_x, probe_y, px, py)` arrays.
+- **Load scans** — enter a data folder in the sidebar and select files. Supports 3D `(energy, px, py)` and 6D `(dummy, energy, probe_x, probe_y, px, py)` arrays.
 - **Detector** — set `px`, `py`, and `radius` under the detector image, or click the image to position the center. For 6D scans, pick probe positions in the sidebar.
 - **Spectrum** — switch linear/log10, set axis limits, customize line styles, and export as CSV/NumPy/SVG/PNG. Drag to pan, Shift+drag an axis to scale it, scroll to zoom, and use the legend to hide/isolate curves.
 - **Background subtraction** — in the **Background** tab, fit with arPLS, SNIP, or one of four analytic models, preview, then apply. Switch the Spectra view between Input/Corrected.
