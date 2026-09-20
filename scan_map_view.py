@@ -20,8 +20,8 @@ def reset_map_detector_center():
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
-def cached_scan_map(info, raw_index, sample, radius, offset_px, offset_py):
-    return detector_scan_map(info, raw_index, sample=sample, radius=radius,
+def cached_scan_map(info, raw_index, dummy, radius, offset_px, offset_py):
+    return detector_scan_map(info, raw_index, dummy=dummy, radius=radius,
                              offset_px=offset_px, offset_py=offset_py)
 
 
@@ -165,7 +165,7 @@ def render_scan_map(infos, labels):
             st.session_state["map_scan"] = next(iter(six_d))
         path = st.selectbox("Map scan", list(six_d), format_func=lambda p: six_d[p][1], key="map_scan")
         info, _ = six_d[path]
-        sample = 0
+        dummy = 0
         energy_text = st.text_input("Map energies (meV)", value="0", key="map_energies",
                                     help="Enter one or more energies separated by commas, for example: 20, 40, 60, 80. "
                                          "Use lo-hi for a range summed over every bin inside it, for example: 10-20.")
@@ -230,7 +230,7 @@ def render_scan_map(infos, labels):
             total = None
             for axis_index in entry["axis_indices"]:
                 for index, weight in map_broadening_weights(axis, axis_index, sigma_mev).items():
-                    contribution = weight * cached_scan_map(info, int(raw_indices[index]), sample, radius, *offsets)
+                    contribution = weight * cached_scan_map(info, int(raw_indices[index]), dummy, radius, *offsets)
                     total = contribution if total is None else total + contribution
             return total
 
@@ -260,7 +260,7 @@ def render_scan_map(infos, labels):
         else:
             range_caption = "Each map uses its own intensity range."
         st.caption(f"Detector center (px, py) = {center}. Horizontal = probe x; vertical = probe y. " + range_caption)
-        base_metadata = dict(source_file=info.path, sample=sample,
+        base_metadata = dict(source_file=info.path, dummy=dummy,
                              timestep_fs=timestep, stride=stride, input_energy_ordering=ordering,
                              detector_radius_px=radius, detector_center_px_py=center,
                              axes=["probe_x", "probe_y"], intensity="raw detector sum",

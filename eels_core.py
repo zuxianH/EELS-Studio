@@ -133,20 +133,20 @@ def _validate_index(name, value, length):
         raise ValueError(f"{name} index {value} is outside [0, {length})")
 
 
-def _probe_key(info, sample, probe_x, probe_y):
+def _probe_key(info, dummy, probe_x, probe_y):
     if len(info.shape) == 3:
-        if (sample, probe_x, probe_y) != (0, 0, 0):
-            raise ValueError("3D arrays contain only sample 0 and probe (0, 0)")
+        if (dummy, probe_x, probe_y) != (0, 0, 0):
+            raise ValueError("3D arrays contain only dummy 0 and probe (0, 0)")
         return [slice(None)] * 3
     for name, value, length in zip(
-        ("sample", "probe x", "probe y"), (sample, probe_x, probe_y),
+        ("dummy", "probe x", "probe y"), (dummy, probe_x, probe_y),
         (info.shape[0], info.shape[2], info.shape[3]),
     ):
         _validate_index(name, value, length)
-    return [sample, slice(None), probe_x, probe_y, slice(None), slice(None)]
+    return [dummy, slice(None), probe_x, probe_y, slice(None), slice(None)]
 
 
-def extract_spectrum(info, *, sample=0, probe_x=0, probe_y=0, radius=20,
+def extract_spectrum(info, *, dummy=0, probe_x=0, probe_y=0, radius=20,
                      offset_px=0, offset_py=0, normalize_3d=True):
     """Integrate bounded direct reads with float64 accumulation.
 
@@ -154,7 +154,7 @@ def extract_spectrum(info, *, sample=0, probe_x=0, probe_y=0, radius=20,
     block, exactly the normalization defined in STEM-EELS.ipynb.
     """
     mask = circular_detector_mask(info.shape[-2:], detector_center(info, offset_px, offset_py), radius)
-    key = _probe_key(info, sample, probe_x, probe_y)
+    key = _probe_key(info, dummy, probe_x, probe_y)
     energy_axis = 0 if len(info.shape) == 3 else 1
     n_energy = info.canonical_shape[1]
     spectrum = np.empty(n_energy, dtype=np.float64)
@@ -183,15 +183,15 @@ def extract_spectrum(info, *, sample=0, probe_x=0, probe_y=0, radius=20,
     return spectrum
 
 
-def diffraction_pattern(info, energy_index, *, sample=0, probe_x=0, probe_y=0):
+def diffraction_pattern(info, energy_index, *, dummy=0, probe_x=0, probe_y=0):
     _validate_index("Energy", energy_index, info.canonical_shape[1])
-    key = _probe_key(info, sample, probe_x, probe_y)
+    key = _probe_key(info, dummy, probe_x, probe_y)
     key[0 if len(info.shape) == 3 else 1] = energy_index
     with _open_scan(info) as reader:
         return reader.read(key).astype(float)
 
 
-def detector_scan_map(info, energy_index, *, sample=0, radius=21,
+def detector_scan_map(info, energy_index, *, dummy=0, radius=21,
                       offset_px=0, offset_py=0):
     """Return raw detector sums indexed by (probe_x, probe_y) at one energy.
 
@@ -201,7 +201,7 @@ def detector_scan_map(info, energy_index, *, sample=0, radius=21,
     """
     if len(info.shape) != 6:
         raise ValueError("A 2D scan map requires a 6D scan")
-    _validate_index("Sample", sample, info.shape[0])
+    _validate_index("Dummy", dummy, info.shape[0])
     _validate_index("Energy", energy_index, info.shape[1])
     mask = circular_detector_mask(info.shape[-2:], detector_center(info, offset_px, offset_py), radius)
     n_x, n_y = info.shape[2:4]
@@ -212,7 +212,7 @@ def detector_scan_map(info, energy_index, *, sample=0, radius=21,
         for x in range(n_x):
             for y in range(0, n_y, row_step):
                 stop = min(y + row_step, n_y)
-                row = reader.read((sample, energy_index, x, slice(y, stop), slice(None), slice(None)))
+                row = reader.read((dummy, energy_index, x, slice(y, stop), slice(None), slice(None)))
                 values = np.sum(row, axis=(-2, -1), where=mask, dtype=np.float64)
                 if not np.isfinite(values).all():
                     raise ValueError("Selected detector data contains NaN, infinite, or overflowed intensities")
@@ -238,7 +238,7 @@ def rectangle_from_plot(shape, x0, x1, y0, y1):
     return tuple(bounds)
 
 
-def extract_angle_resolved(info, bounds, *, retain_axis="py", sample=0,
+def extract_angle_resolved(info, bounds, *, retain_axis="py", dummy=0,
                            probe_x=0, probe_y=0, normalize_3d=True):
     """Sum a rectangular strip, returning (pixel offsets, energy-by-pixel map).
 
@@ -255,7 +255,7 @@ def extract_angle_resolved(info, bounds, *, retain_axis="py", sample=0,
         raise ValueError("Rectangle bounds must be ordered and inside the diffraction plane")
     retained = np.arange(c0, c1 + 1) if retain_axis == "py" else np.arange(r0, r1 + 1)
     pixels = retained - info.shape[-1 if retain_axis == "py" else -2] // 2
-    key = _probe_key(info, sample, probe_x, probe_y)
+    key = _probe_key(info, dummy, probe_x, probe_y)
     energy_axis = 0 if len(info.shape) == 3 else 1
     n_energy = info.canonical_shape[1]
     result = np.empty((n_energy, len(pixels)), dtype=np.float64)
@@ -316,16 +316,16 @@ def display_intensity(values, mode):
 
 def curve_identity_key(curve):
     """Stable identifier for a curve's source, independent of its display label."""
-    return json.dumps([curve["path"], curve["sample"], curve["probe_x"], curve["probe_y"]])
+    return json.dumps([curve["path"], curve["dummy"], curve["probe_x"], curve["probe_y"]])
 
 
 def export_csv(curves):
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["label", "source_file", "sample", "probe_x", "probe_y", "energy_meV", "intensity"])
+    writer.writerow(["label", "source_file", "dummy", "probe_x", "probe_y", "energy_meV", "intensity"])
     for curve in curves:
         for energy, intensity in zip(curve["energy"], curve["intensity"]):
-            writer.writerow([curve["label"], curve["path"], curve["sample"], curve["probe_x"],
+            writer.writerow([curve["label"], curve["path"], curve["dummy"], curve["probe_x"],
                              curve["probe_y"], energy, intensity])
     return output.getvalue().encode("utf-8")
 

@@ -21,7 +21,7 @@ class ScanReader:
             self.offset = stream.tell()
         if len(self.shape) not in (3, 6) or any(n <= 0 for n in self.shape):
             raise ValueError(
-                "Expected (energy, px, py) or (sample, energy, probe_x, probe_y, px, py); "
+                "Expected (energy, px, py) or (dummy, energy, probe_x, probe_y, px, py); "
                 f"got {self.shape}"
             )
         if self.dtype.kind not in "fiu":

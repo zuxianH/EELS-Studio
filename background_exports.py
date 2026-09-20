@@ -33,7 +33,7 @@ def background_metadata(curves, settings, state, signal):
         background=dict(configuration=asdict(config), algorithm_parameters=parameters, package=package,
                         package_version=package_version,
                         fitted_input_stage="linear, energy-unweighted intensity after optional Gaussian broadening"),
-        curves=[dict(**{k: c[k] for k in ("label", "path", "sample", "probe_x", "probe_y", "style") if k in c},
+        curves=[dict(**{k: c[k] for k in ("label", "path", "dummy", "probe_x", "probe_y", "style") if k in c},
                      source_revision=state.source_revisions.get(c["path"]),
                      input_fingerprint=state.fingerprints[curve_identity_key(c)],
                      diagnostics=asdict(state.applied_results[curve_identity_key(c)].diagnostics)) for c in curves])
@@ -58,7 +58,7 @@ def background_csv(curves, settings, state, signal, *, all_arrays=True):
     output = io.StringIO()
     writer = csv.writer(output)
     columns = ["input_intensity", "baseline", "corrected_intensity", "validity_mask"] if all_arrays else ["intensity"]
-    writer.writerow(["curve_id", "label", "source_file", "sample", "probe_x", "probe_y", "energy_meV", "signal", *columns, "metadata_json"])
+    writer.writerow(["curve_id", "label", "source_file", "dummy", "probe_x", "probe_y", "energy_meV", "signal", *columns, "metadata_json"])
     metadata = json.dumps(background_metadata(curves, settings, state, signal))
     for i, c in enumerate(curves):
         r = state.applied_results[curve_identity_key(c)]
@@ -66,6 +66,6 @@ def background_csv(curves, settings, state, signal, *, all_arrays=True):
             values = ([r.input[j], r.baseline[j], r.corrected[j], bool(r.validity_mask[j])] if all_arrays
                       else [r.corrected[j] if signal == "Corrected" else r.input[j]])
             values = [v if np.isfinite(v) else "" for v in values]
-            writer.writerow([f"curve_{i:03d}", c["label"], c["path"], c["sample"], c["probe_x"], c["probe_y"],
+            writer.writerow([f"curve_{i:03d}", c["label"], c["path"], c["dummy"], c["probe_x"], c["probe_y"],
                              energy, signal, *values, metadata if i == j == 0 else ""])
     return output.getvalue().encode("utf-8")

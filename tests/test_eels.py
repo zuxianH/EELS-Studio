@@ -37,16 +37,16 @@ def test_matches_notebook(tmp_path, notebook, shape, normalize):
     path = tmp_path / "scan.npy"
     np.save(path, data)
     info = inspect_scan(path)
-    sample, x, y = (1, 2, 1) if len(shape) == 6 else (0, 0, 0)
+    dummy, x, y = (1, 2, 1) if len(shape) == 6 else (0, 0, 0)
     canonical = data if len(shape) == 6 else data[None, :, None, None, :, :]
-    actual = extract_spectrum(info, sample=sample, probe_x=x, probe_y=y,
+    actual = extract_spectrum(info, dummy=dummy, probe_x=x, probe_y=y,
                               radius=2.5, offset_px=-1, offset_py=2, normalize_3d=normalize)
     expected = notebook["extract_probe_spectrum"](
-        canonical, probe_x=x, probe_y=y, sample=sample, radius=2.5,
+        canonical, probe_x=x, probe_y=y, sample=dummy, radius=2.5,
         detector_center=(shape[-2] // 2 - 1, shape[-1] // 2 + 2), normalize_3d=normalize)
     np.testing.assert_allclose(actual, expected, rtol=1e-13)
-    np.testing.assert_array_equal(diffraction_pattern(info, 4, sample=sample, probe_x=x, probe_y=y),
-                                  canonical[sample, 4, x, y])
+    np.testing.assert_array_equal(diffraction_pattern(info, 4, dummy=dummy, probe_x=x, probe_y=y),
+                                  canonical[dummy, 4, x, y])
 
 
 @pytest.mark.parametrize("length", [1, 5, 600])
@@ -160,7 +160,7 @@ def test_multiblock_normalization(tmp_path):
 
 
 def test_exports_different_energy_lengths():
-    curves = [dict(label=f"Test, {n}", path="scan.npy", sample=0, probe_x=0, probe_y=0,
+    curves = [dict(label=f"Test, {n}", path="scan.npy", dummy=0, probe_x=0, probe_y=0,
                    energy=energy_loss_axis_mev(n), intensity=np.arange(n, dtype=float)) for n in (5, 6)]
     with np.load(io.BytesIO(export_npz(curves, {"stride": 3})), allow_pickle=False) as result:
         assert result["curve_000"].shape == (5, 2)
@@ -216,7 +216,7 @@ def test_app_six_dimensional_files(tmp_path):
         app.multiselect(key="probe_positions").set_value(positions).run()
         assert not app.exception and not app.error
         assert app.metric[1].value == "4"
-        assert all(w.label not in ("Sample index", "Probe y index") for w in app.number_input)
+        assert all(w.label not in ("Dummy index", "Probe y index") for w in app.number_input)
         curves, settings = exported.call_args.args
         assert settings["probe_positions_xy"] == positions
         assert [(c["probe_x"], c["probe_y"]) for c in curves] == positions * 2

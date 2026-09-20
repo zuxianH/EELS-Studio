@@ -20,8 +20,8 @@ _RECTANGLE_SELECT_JS = Path(__file__).with_name("rectangle_select.js").read_text
 
 
 @st.cache_data(show_spinner=False, max_entries=16)
-def cached_map(info, bounds, retain_axis, sample, probe_x, probe_y, normalize):
-    return extract_angle_resolved(info, bounds, retain_axis=retain_axis, sample=sample,
+def cached_map(info, bounds, retain_axis, dummy, probe_x, probe_y, normalize):
+    return extract_angle_resolved(info, bounds, retain_axis=retain_axis, dummy=dummy,
                                   probe_x=probe_x, probe_y=probe_y, normalize_3d=normalize)
 
 
@@ -144,10 +144,10 @@ def render_angle_resolved(curves, scans, settings):
     unshifted = settings["input_energy_ordering"] == "Unshifted FFT"
     index, raw_index = nearest_energy_index(energy, requested_energy, unshifted=unshifted)
     try:
-        plane = cached_diffraction_pattern(info, raw_index, curve["sample"], curve["probe_x"], curve["probe_y"])
+        plane = cached_diffraction_pattern(info, raw_index, curve["dummy"], curve["probe_x"], curve["probe_y"])
         if not np.isfinite(plane).all():
             raise ValueError("Diffraction preview contains nonfinite values")
-        pixels, raw_map = cached_map(info, tuple(bounds), retain_axis, curve["sample"],
+        pixels, raw_map = cached_map(info, tuple(bounds), retain_axis, curve["dummy"],
                                      curve["probe_x"], curve["probe_y"], settings["normalize_3d"])
         intensity = process_angle_resolved(energy, raw_map, unshifted=unshifted,
                                            sigma_mev=settings["gaussian_sigma_mev"])
@@ -208,7 +208,7 @@ def render_angle_resolved(curves, scans, settings):
         st.caption("Nonpositive bins are blank on the log map; exported linear data retains them.")
     if not np.any((energy >= energy_min) & (energy <= energy_max)):
         st.warning("The selected map energy window contains no data bins.")
-    metadata = dict(source={k: curve[k] for k in ("label", "path", "sample", "probe_x", "probe_y")},
+    metadata = dict(source={k: curve[k] for k in ("label", "path", "dummy", "probe_x", "probe_y")},
                      settings=settings, roi_bounds_inclusive=bounds,
                      retained_axis=retain_axis, pixel_origin="array integer center",
                      intensity_axes=["energy", "pixel"], color_scale="log10" if logarithmic else "linear",

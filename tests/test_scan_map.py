@@ -18,20 +18,20 @@ def test_direct_reads_without_numpy_load(tmp_path, order, shape, dtype):
     path = tmp_path / "scan.npy"
     np.save(path, data)
     canonical = data if data.ndim == 6 else data[None, :, None, None]
-    sample, x, y = (1, 2, 3) if data.ndim == 6 else (0, 0, 0)
+    dummy, x, y = (1, 2, 3) if data.ndim == 6 else (0, 0, 0)
     mask = circular_detector_mask(shape[-2:], center=(1, 4), radius=1.5)
-    block = canonical[sample, :, x, y]
+    block = canonical[dummy, :, x, y]
     expected = block[:, mask].sum(axis=1, dtype=np.float64)
     with patch("numpy.load", side_effect=AssertionError("Full-file load/map attempted")):
         info = inspect_scan(path)
         for normalize in (False, True):
-            actual = extract_spectrum(info, sample=sample, probe_x=x, probe_y=y,
+            actual = extract_spectrum(info, dummy=dummy, probe_x=x, probe_y=y,
                                       radius=1.5, offset_px=-1, offset_py=1, normalize_3d=normalize)
             np.testing.assert_allclose(actual, expected / block.sum(dtype=np.float64) if normalize else expected)
-        np.testing.assert_array_equal(diffraction_pattern(info, 20, sample=sample, probe_x=x, probe_y=y), block[20])
+        np.testing.assert_array_equal(diffraction_pattern(info, 20, dummy=dummy, probe_x=x, probe_y=y), block[20])
         if data.ndim == 6:
-            result = detector_scan_map(info, 20, sample=sample, radius=1.5, offset_px=-1, offset_py=1)
-            np.testing.assert_allclose(result, canonical[sample, 20, :, :, mask].sum(axis=0, dtype=np.float64))
+            result = detector_scan_map(info, 20, dummy=dummy, radius=1.5, offset_px=-1, offset_py=1)
+            np.testing.assert_allclose(result, canonical[dummy, 20, :, :, mask].sum(axis=0, dtype=np.float64))
 
 
 def test_map_reads_one_row_at_selected_energy(tmp_path):
@@ -41,7 +41,7 @@ def test_map_reads_one_row_at_selected_energy(tmp_path):
     with patch("numpy.fromfile", wraps=np.fromfile) as reads:
         info = inspect_scan(path)
         assert not reads.called  # Inspection reads only the header.
-        actual = detector_scan_map(info, 5, sample=1, radius=1)
+        actual = detector_scan_map(info, 5, dummy=1, radius=1)
         assert reads.call_count == 3
         assert all(c.kwargs["count"] == 4 * 5 * 6 for c in reads.call_args_list)
     mask = circular_detector_mask((5, 6), radius=1)
@@ -53,7 +53,7 @@ def test_zero_invalid_and_changed_map(tmp_path):
     np.save(path, np.zeros((1, 3, 2, 4, 5, 6)))
     info = inspect_scan(path)
     np.testing.assert_array_equal(detector_scan_map(info, 1), np.zeros((2, 4)))
-    for kwargs in ({"energy_index": 3}, {"energy_index": 0, "sample": 1}, {"energy_index": 0, "radius": 0}):
+    for kwargs in ({"energy_index": 3}, {"energy_index": 0, "dummy": 1}, {"energy_index": 0, "radius": 0}):
         with pytest.raises(ValueError):
             detector_scan_map(info, **kwargs)
     data = np.zeros(info.shape)
@@ -87,7 +87,7 @@ def test_map_app_defaults_and_no_spectrum_extraction(tmp_path):
         assert app.metric[1].value == "12"
         assert any("all zero" in item.value for item in app.info)
         assert len(app.get("download_button")) == 3
-        assert all(w.label != "Sample index" for w in app.number_input)
+        assert all(w.label != "Dummy index" for w in app.number_input)
         app.selectbox(key="map_ordering").select("Unshifted FFT").run()
         assert not app.exception and not app.error
         spec = json.loads(app.get("plotly_chart")[0].proto.spec)

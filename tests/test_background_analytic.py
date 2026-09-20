@@ -32,7 +32,7 @@ def analytic_config(model_name, segments=((5.0, 25.0), (95.0, 125.0))):
 
 def curve(model_name, n=400, seed=0):
     x, y, true_params = analytic_curve(model_name, n, seed)
-    return dict(path=f"scan_{model_name}.npy", sample=0, probe_x=0, probe_y=0,
+    return dict(path=f"scan_{model_name}.npy", dummy=0, probe_x=0, probe_y=0,
                 label=f"Curve {model_name}", energy=x, intensity=y,
                 style=dict(color="#137c78", width=2.0, line_style="Solid")), true_params
 

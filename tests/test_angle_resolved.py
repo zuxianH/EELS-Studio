@@ -20,10 +20,10 @@ def test_rectangle_map_matches_numpy(tmp_path, shape, retain_axis, normalize, or
     data = np.random.default_rng(42).uniform(0.1, 5, shape).astype(np.float32, order=order)
     path = tmp_path / "scan.npy"
     np.save(path, data)
-    sample, x, y = (1, 2, 1) if len(shape) == 6 else (0, 0, 0)
-    block = data[sample, :, x, y] if len(shape) == 6 else data
+    dummy, x, y = (1, 2, 1) if len(shape) == 6 else (0, 0, 0)
+    block = data[dummy, :, x, y] if len(shape) == 6 else data
     pixels, actual = extract_angle_resolved(inspect_scan(path), (1, 4, 3, 8),
-        retain_axis=retain_axis, sample=sample, probe_x=x, probe_y=y, normalize_3d=normalize)
+        retain_axis=retain_axis, dummy=dummy, probe_x=x, probe_y=y, normalize_3d=normalize)
     expected = block[:, 1:5, 3:9].sum(axis=1 if retain_axis == "py" else 2, dtype=np.float64)
     if normalize:
         expected /= block.sum(dtype=np.float64)

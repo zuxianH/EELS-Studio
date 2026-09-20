@@ -70,8 +70,8 @@ h1 {{letter-spacing: -0.045em;}}
 
 
 @st.cache_data(show_spinner=False, max_entries=128)
-def cached_spectrum(info, sample, probe_x, probe_y, radius, offset_px, offset_py, normalize):
-    return extract_spectrum(info, sample=sample, probe_x=probe_x, probe_y=probe_y,
+def cached_spectrum(info, dummy, probe_x, probe_y, radius, offset_px, offset_py, normalize):
+    return extract_spectrum(info, dummy=dummy, probe_x=probe_x, probe_y=probe_y,
                             radius=radius, offset_px=offset_px, offset_py=offset_py,
                             normalize_3d=normalize)
 
@@ -236,7 +236,7 @@ with st.sidebar:
     normalize = st.checkbox("Normalize full probe block", value=True,
                             help="Divide by the sum over all energy bins and all detector-plane pixels at this probe, before detector integration. Matches normalize_3d in the notebook.")
     six_d = [i for i in infos if len(i.shape) == 6]
-    sample = 0
+    dummy = 0
     if six_d:
         n_x = min(i.shape[2] for i in six_d)
         n_y = min(i.shape[3] for i in six_d)
@@ -277,7 +277,7 @@ with st.sidebar:
             st.caption(f"FWHM = {sigma_mev * np.sqrt(8 * np.log(2)):.3f} meV. Applies to spectra and downloads; the diffraction image stays unchanged.")
 
 settings = dict(detector_radius_px=radius, center_offset_px=offset_px, center_offset_py=offset_py,
-                normalize_3d=normalize, sample=sample, probe_positions_xy=probe_positions,
+                normalize_3d=normalize, dummy=dummy, probe_positions_xy=probe_positions,
                 timestep_fs=timestep, stride=stride, input_energy_ordering=ordering,
                 gaussian_sigma_mev=sigma_mev, gaussian_boundary="reflect", gaussian_truncate=4.0,
                 processing_order=["detector integration / optional full-probe normalization",
@@ -288,7 +288,7 @@ try:
     with st.spinner("Integrating detector intensities…"):
         for info, label in zip(infos, labels):
             positions = probe_positions if len(info.shape) == 6 else [(0, 0)]
-            s = sample
+            s = dummy
             energy = energy_loss_axis_mev(info.canonical_shape[1], timestep, stride)
             for x, y in positions:
                 intensity = cached_spectrum(info, s, x, y, radius, offset_px, offset_py, normalize)
@@ -297,7 +297,7 @@ try:
                 if sigma_mev > 0:
                     intensity = gaussian_broaden_spectrum(energy, intensity, sigma_mev)
                 name = f"{label} · x={x}, y={y}" if len(info.shape) == 6 else label
-                curves.append(dict(label=name, path=info.path, sample=s, probe_x=x, probe_y=y,
+                curves.append(dict(label=name, path=info.path, dummy=s, probe_x=x, probe_y=y,
                                    energy=energy, intensity=intensity))
 except (OSError, ValueError, IndexError, EOFError) as exc:
     st.error(f"Could not extract spectra: {exc}")
@@ -426,7 +426,7 @@ with spectrum_tab:
                 _, raw_index = nearest_energy_index(axis, requested_energy,
                                                     unshifted=ordering == "Unshifted FFT")
                 try:
-                    pattern = cached_diffraction_pattern(info, raw_index, curve["sample"], curve["probe_x"], curve["probe_y"])
+                    pattern = cached_diffraction_pattern(info, raw_index, curve["dummy"], curve["probe_x"], curve["probe_y"])
                     if not np.isfinite(pattern).all():
                         raise ValueError("Diffraction plane contains NaN or infinite intensities")
                     if pattern_log:
@@ -473,7 +473,7 @@ with spectrum_tab:
                     axis_scaling(key="detector_axis_scaling", height=0, data=dict(
                         selector=".st-key-detector_click_target .js-plotly-plot",
                         viewport_key="eels.detector.viewport"))
-                    preview_id = json.dumps([info.path, info.mtime_ns, curve["sample"], curve["probe_x"], curve["probe_y"], raw_index])
+                    preview_id = json.dumps([info.path, info.mtime_ns, curve["dummy"], curve["probe_x"], curve["probe_y"], raw_index])
                     st.session_state["detector_preview_context"] = dict(preview_id=preview_id, shape=pattern.shape,
                                                                        selected_shapes=[i.shape[-2:] for i in infos])
                     # Renew the bridge after each Streamlit redraw, including manual edits.
@@ -548,7 +548,7 @@ with details_tab:
 **Array conventions**
 
 - 3D: `(energy, px, py)`, one probe block per file.
-- 6D: `(sample, energy, probe_x, probe_y, px, py)`, first sample and selected probe positions.
+- 6D: `(dummy, energy, probe_x, probe_y, px, py)`, first dummy index and selected probe positions.
 - The circular detector uses `(px − center_px)² + (py − center_py)² ≤ radius²`.
 - Full-probe normalization divides by the sum over **all energy bins and all pixels** at that probe.
 - Energy is `fftshift(fftfreq(n_energy, timestep_fs × stride / 1000)) × 4.13566769692386` in meV.

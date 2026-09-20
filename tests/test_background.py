@@ -30,7 +30,7 @@ def spectrum(n=501, offset=2):
 
 def curve(n=501, offset=2):
     x, y, _ = spectrum(n, offset)
-    return dict(path=f"scan_{n}_{offset}.npy", sample=0, probe_x=0, probe_y=0,
+    return dict(path=f"scan_{n}_{offset}.npy", dummy=0, probe_x=0, probe_y=0,
                 label=f"Curve {offset}", energy=x, intensity=y,
                 style=dict(color="#137c78", width=2.0, line_style="Solid"))
 
