@@ -1,0 +1,6 @@
+numpy>=2.0,<3
+streamlit>=1.63,<2
+plotly>=6,<8
+matplotlib>=3.9,<4
+scipy>=1.14,<2
+pybaselines==1.2.1
