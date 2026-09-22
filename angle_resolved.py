@@ -97,7 +97,7 @@ def render_angle_resolved(curves, scans, settings):
     retain_axis = "py" if direction == "Horizontal (py)" else "px"
     requested_energy = controls[1].number_input("Box preview energy (meV)", value=0.0, step=1.0,
                                                key="angle_preview_energy")
-    preview_log = controls[2].checkbox("Log box diffraction image", value=True)
+    preview_log = controls[2].checkbox("Log box diffraction image", value=True, key="angle_preview_log")
     # Bounds are stored per detector plane, shared by probes within that file.
     namespace = json.dumps([info.path, shape])
     bound_keys = [f"angle_roi:{namespace}:{name}" for name in ("r0", "r1", "c0", "c1")]
@@ -110,6 +110,9 @@ def render_angle_resolved(curves, scans, settings):
     for col, key, label, default, count in zip(bound_columns, bound_keys,
             ("Row min (px)", "Row max (px)", "Column min (py)", "Column max (py)"),
             defaults, (shape[0], shape[0], shape[1], shape[1])):
+        if key in st.session_state:
+            st.session_state[key] = min(count - 1, max(0, st.session_state[key]))
+        default = min(count - 1, max(0, default))
         bounds.append(int(col.number_input(label, min_value=0, max_value=count - 1,
                                            value=default, step=1, key=key, disabled=count == 1)))
     if "angle_rectangle_error" in st.session_state:
@@ -123,18 +126,18 @@ def render_angle_resolved(curves, scans, settings):
                f"sum over {'rows (px)' if retain_axis == 'py' else 'columns (py)'}. "
                "The box is independent of the circular spectrum detector.")
     display_controls = st.columns(3)
-    logarithmic = display_controls[0].selectbox("Map color scale", ["log10", "Linear"]) == "log10"
-    energy_min = display_controls[1].number_input("Map energy min (meV)", value=-150.0, step=10.0)
-    energy_max = display_controls[2].number_input("Map energy max (meV)", value=150.0, step=10.0)
+    logarithmic = display_controls[0].selectbox("Map color scale", ["log10", "Linear"], key="angle_color_scale") == "log10"
+    energy_min = display_controls[1].number_input("Map energy min (meV)", value=-150.0, step=10.0, key="angle_energy_min")
+    energy_max = display_controls[2].number_input("Map energy max (meV)", value=150.0, step=10.0, key="angle_energy_max")
     if energy_min >= energy_max:
         st.warning("Map energy min must be less than map energy max.")
         return
     color_limits = (None, None)
-    if st.checkbox("Set map color limits"):
+    if st.checkbox("Set map color limits", key="angle_manual_color"):
         low, high = st.columns(2)
         suffix = "log10 intensity" if logarithmic else "linear intensity"
-        color_limits = (low.number_input(f"Map color min ({suffix})", value=-10.0 if logarithmic else 0.0),
-                        high.number_input(f"Map color max ({suffix})", value=-5.0 if logarithmic else 1.0))
+        color_limits = (low.number_input(f"Map color min ({suffix})", value=-10.0 if logarithmic else 0.0, key="angle_color_min"),
+                        high.number_input(f"Map color max ({suffix})", value=-5.0 if logarithmic else 1.0, key="angle_color_max"))
         if color_limits[0] >= color_limits[1]:
             st.warning("Map color min must be less than map color max.")
             return

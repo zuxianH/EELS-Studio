@@ -1,6 +1,6 @@
 # EELS Studio
 
-A local browser app for exploring vibrational EELS: select NumPy (`.npy`) or local Zarr diffraction scans, position a circular detector, compare spectra, subtract backgrounds, and build 2D/angle-resolved maps.
+A local browser app for exploring vibrational EELS: select NumPy (`.npy`) or local Zarr diffraction scans, position a circular detector, compare spectra, subtract backgrounds, and build 2D/angle-resolved maps. 
 
 ## Run
 
@@ -20,6 +20,29 @@ Open http://localhost:8501 (binds to localhost only). Once `.venv` exists, `./ru
 - **Background subtraction** — in the **Background** tab, fit with arPLS, SNIP, or one of four analytic models, preview, then apply. Switch the Spectra view between Input/Corrected.
 - **2D scan maps** — under **Visualization → 2D scan map**, request one or more energies to see detector-summed intensity across probe positions.
 - **Angle-resolved EELS** — draw a rectangle on the diffraction image to sum a strip across one detector direction, producing an energy-vs-pixel map.
+
+## Save and resume a workspace
+
+In the sidebar, open **Workspace config** and click **Save config** to download
+`eels-studio-config.json`. Keep a separate config for each analysis if useful.
+After restarting EELS Studio, choose that JSON file under **Config file**, then
+click **Load config**. You can also load a config while working to replace the
+current workspace settings.
+
+Configs include the data folder, selected scans and probe positions, curve labels,
+line colors/styles/widths, detector geometry, normalization, energy calibration,
+broadening, intensity display and energy limits, previews, map settings and
+rectangles, and export resolution. Background draft parameters are retained;
+previously applied background fits are recalculated from their saved parameters
+when the spectra are loaded. Settings for both visualization modes are retained
+when switching between spectra and 2D maps.
+
+The JSON stores paths and settings, not scan data or cached arrays. Keep the
+original NumPy/Zarr data available at the same paths. If data moved, choose its
+new folder and reselect the scans; file-specific labels and styles are tied to
+original paths. Missing scans are reported. Manual plot zoom/pan, hidden legend
+entries, and prepared Zarr caches are not saved. Save the config again after
+making changes; saving is explicit, not automatic.
 
 ## NumPy and Zarr input
 

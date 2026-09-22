@@ -31,6 +31,7 @@ from background_exports import background_csv, background_npz
 from background_view import render_background
 from folder_browser import render_folder_input
 from scan_sources import discover_scans, resolve_data_directory, scan_revision
+from workspace_config import render_config_controls, render_config_download, restore_background
 
 ROOT = Path(__file__).resolve().parent
 detector_click_bridge = register_detector_click_bridge()
@@ -173,6 +174,8 @@ def reset_detector_center():
     st.session_state["offset_py"] = 0
 
 
+config_slot = render_config_controls()
+
 st.caption("STEM · SPECTROSCOPY WORKSPACE")
 st.title("EELS Studio")
 st.write("Choose your scans, position the detector, and explore spectra or a 2D probe map.")
@@ -188,10 +191,12 @@ with st.sidebar:
         available = discover_scans(directory)
     except (OSError, ValueError) as exc:
         st.error(str(exc))
+        render_config_download(config_slot)
         st.stop()
     if not available:
         st.info("No NumPy or Zarr scans in this folder. Choose a folder containing .npy files "
                 "or Zarr arrays (.zarr/.zarray), or select a Zarr array directory directly.")
+        render_config_download(config_slot)
         st.stop()
     # Inspection reads metadata only. Zarr revisions include nested chunk stats.
     scans, rejected = {}, []
@@ -207,11 +212,19 @@ with st.sidebar:
     options = list(scans)
     if not options:
         st.info("No supported 3D or 6D scan arrays found.")
+        render_config_download(config_slot)
         st.stop()
+    files_key = f"files:{directory}"
+    if files_key in st.session_state:
+        missing = [p for p in st.session_state[files_key] if p not in scans]
+        if missing:
+            st.warning("Saved scans unavailable in this folder: " + ", ".join(Path(p).name for p in missing))
+            st.session_state[files_key] = [p for p in st.session_state[files_key] if p in scans]
     selected = st.multiselect("Files to compare", options, default=options[:2],
                              format_func=lambda p: Path(p).name, key=f"files:{directory}")
     if not selected:
         st.info("Select at least one scan to get started.")
+        render_config_download(config_slot)
         st.stop()
     infos = [scans[p] for p in selected]
     for info in infos:
@@ -226,10 +239,12 @@ with st.sidebar:
                   for p in selected]
     if any(not label for label in labels) or len(set(labels)) != len(labels):
         st.warning("Give each selected file a nonempty, unique curve label.")
+        render_config_download(config_slot)
         st.stop()
 
 if view == "2D scan map":
     render_scan_map(infos, labels)
+    render_config_download(config_slot)
     st.stop()
 
 with st.sidebar:
@@ -252,7 +267,7 @@ with st.sidebar:
     offset_py = st.session_state.get("offset_py", 0)
     if "detector_click_error" in st.session_state:
         st.warning(st.session_state.pop("detector_click_error"))
-    normalize = st.checkbox("Normalize full probe block", value=True,
+    normalize = st.checkbox("Normalize full probe block", value=True, key="normalize_probe",
                             help="Divide by the sum over all energy bins and all detector-plane pixels at this probe, before detector integration. Matches normalize_3d in the notebook.")
     six_d = [i for i in infos if len(i.shape) == 6]
     dummy = 0
@@ -273,6 +288,7 @@ with st.sidebar:
             help="Choose individual probe positions. Each selected pair produces one spectrum per 6D file.")
         if not probe_positions:
             st.info("Select at least one probe position (x, y).")
+            render_config_download(config_slot)
             st.stop()
         if len(six_d) != len(infos):
             st.caption("3D files contribute one curve at probe (0, 0). Selected pairs apply to 6D scans.")
@@ -301,15 +317,15 @@ with st.sidebar:
 
     with st.expander("Energy calibration", expanded=True):
         timestep = st.number_input("Simulation time step (fs)", min_value=0.000001,
-                                   value=2.5, step=0.5, format="%.6f")
-        stride = st.number_input("Sampling stride", min_value=1, value=3, step=1)
+                                   value=2.5, step=0.5, format="%.6f", key="spectrum_timestep")
+        stride = st.number_input("Sampling stride", min_value=1, value=3, step=1, key="spectrum_stride")
         st.caption("Confirm these values for your simulation. Time calibration is not inferred from NumPy or Zarr input. Applied to every selected scan.")
-        ordering = st.selectbox("Input energy ordering", ["FFT-shifted (notebook default)", "Unshifted FFT"])
+        ordering = st.selectbox("Input energy ordering", ["FFT-shifted (notebook default)", "Unshifted FFT"], key="spectrum_ordering")
 
     with st.expander("Gaussian broadening", expanded=True):
-        broaden = st.checkbox("Broaden EELS spectrum", value=False)
+        broaden = st.checkbox("Broaden EELS spectrum", value=False, key="broaden_spectrum")
         sigma_input = st.number_input("Gaussian σ (meV)", min_value=0.0, value=1.0, step=0.5,
-                                      disabled=not broaden, help="Standard deviation of the Gaussian, applied to linear intensities after detector integration.")
+                                      disabled=not broaden, key="spectrum_sigma", help="Standard deviation of the Gaussian, applied to linear intensities after detector integration.")
         sigma_mev = sigma_input if broaden else 0.0
         if broaden:
             st.caption(f"FWHM = {sigma_mev * np.sqrt(8 * np.log(2)):.3f} meV. Applies to spectra and downloads; the diffraction image stays unchanged.")
@@ -339,14 +355,17 @@ try:
                                    energy=energy, intensity=intensity))
 except (OSError, ValueError, IndexError, EOFError) as exc:
     st.error(f"Could not extract spectra: {exc}")
+    render_config_download(config_slot)
     st.stop()
 
 with st.sidebar:
     with st.expander("Detector preview", expanded=True):
+        if st.session_state.get("preview_index", 0) >= len(curves):
+            st.session_state["preview_index"] = 0
         preview_index = st.selectbox("Preview spectrum", list(range(len(curves))),
-                                     format_func=lambda i: curves[i]["label"])
-        requested_energy = st.number_input("Preview energy (meV)", value=0.0, step=1.0)
-        pattern_log = st.checkbox("Log diffraction image", value=True)
+                                     format_func=lambda i: curves[i]["label"], key="preview_index")
+        requested_energy = st.number_input("Preview energy (meV)", value=0.0, step=1.0, key="preview_energy")
+        pattern_log = st.checkbox("Log diffraction image", value=True, key="pattern_log")
 
 metrics = st.columns(4)
 metrics[0].metric("Selected scans", len(infos))
@@ -364,6 +383,7 @@ if background_state.sync_inputs(input_fingerprints(curves, settings, revisions))
     st.session_state["bg_signal"] = "Input"
     if had_background:
         st.info("Background results cleared because inputs or selected curves changed. Settings are retained for refitting.")
+restore_background(curves, background_state)
 if "bg_next_signal" in st.session_state:
     st.session_state["bg_signal"] = st.session_state.pop("bg_next_signal")
 spectrum_tab, background_tab, angle_tab, details_tab = st.tabs(
@@ -381,13 +401,14 @@ with spectrum_tab:
     controls = st.columns([1.3, 1, 1])
     display_modes = {"log10": "log10", "Linear": "linear", "Intensity × E²": "energy_squared"}
     mode_label = controls[0].selectbox(
-        "Intensity display", list(display_modes),
+        "Intensity display", list(display_modes), key="intensity_display",
         help="Intensity × E² multiplies each intensity by its energy loss squared (in meV²). Applies to the plot and figure downloads.")
     mode = display_modes[mode_label]
-    x_min = controls[1].number_input("Energy min (meV)", value=-150.0, step=10.0)
-    x_max = controls[2].number_input("Energy max (meV)", value=150.0, step=10.0)
+    x_min = controls[1].number_input("Energy min (meV)", value=-150.0, step=10.0, key="spectrum_x_min")
+    x_max = controls[2].number_input("Energy max (meV)", value=150.0, step=10.0, key="spectrum_x_max")
     if x_min >= x_max:
         st.error("Energy min must be less than energy max.")
+        render_config_download(config_slot)
         st.stop()
     x_limits = (x_min, x_max)
     with st.expander("Line appearance", expanded=False):
@@ -435,9 +456,9 @@ with spectrum_tab:
                       meta=dict(eels_render_revision=st.session_state["spectrum_render_revision"]),
                       # Preserve exploration across recalculation; explicit limit edits still apply.
                       xaxis=dict(title="Energy loss (meV)", range=x_limits, zerolinecolor="#bdcbd4",
-                                 gridcolor="#EAF0F7", hoverformat=".4f", uirevision=json.dumps(x_limits)),
+                                 gridcolor="#EAF0F7", hoverformat=".4f", uirevision=json.dumps([x_limits, st.session_state.get("workspace_revision", 0)])),
                       yaxis=dict(title=intensity_label(mode, normalize, corrected), gridcolor="#EAF0F7",
-                                 uirevision=f"yaxis:{mode}"))
+                                 uirevision=f"yaxis:{mode}:{st.session_state.get('workspace_revision', 0)}"))
     workspace_row = st.container(key="workspace_row")
     with workspace_row:
         detector_col, plot_col = st.columns([1, 2], gap="medium") if show_detector else (None, st.container())
@@ -602,3 +623,5 @@ File headers are inspected without memory mapping. Selected data is read directl
 Different energy lengths are supported; shared time step and stride must be appropriate for every selected scan.
 """)
     st.code(json.dumps(settings, indent=2), language="json")
+
+render_config_download(config_slot)

@@ -86,7 +86,11 @@ def test_map_app_defaults_and_no_spectrum_extraction(tmp_path):
         assert app.number_input(key="map_radius").value == 21.0
         assert app.metric[1].value == "12"
         assert any("all zero" in item.value for item in app.info)
-        assert len(app.get("download_button")) == 3
+        # Single-map PNG export lives in the chart toolbar; workspace saving
+        # must also remain available in this visualization mode.
+        assert any(w.key == "workspace_download" for w in app.get("download_button"))
+        chart_config = json.loads(app.get("plotly_chart")[0].proto.config)
+        assert chart_config["toImageButtonOptions"]["format"] == "png"
         assert all(w.label != "Dummy index" for w in app.number_input)
         app.selectbox(key="map_ordering").select("Unshifted FFT").run()
         assert not app.exception and not app.error
