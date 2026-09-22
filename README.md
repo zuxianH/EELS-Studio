@@ -1,6 +1,6 @@
 # EELS Studio
 
-A local browser app for exploring vibrational EELS: select NumPy (`.npy`) or local Zarr diffraction scans, position a circular detector, compare spectra, subtract backgrounds, and build 2D/angle-resolved maps. Calculations follow the lab's STEM-EELS notebook workflow, reimplemented in `eels_core.py`.
+A local browser app for exploring vibrational EELS: select NumPy (`.npy`) or local Zarr diffraction scans, position a circular detector, compare spectra, subtract backgrounds, and build 2D/angle-resolved maps.
 
 ## Run
 
