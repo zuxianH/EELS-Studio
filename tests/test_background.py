@@ -286,7 +286,7 @@ def test_app_background_workflow_processing_and_maps(tmp_path):
         # Angle-resolved metadata must remain independent even while corrected is selected.
         from angle_resolved import export_map
         with patch("angle_resolved.export_map", wraps=export_map) as exported:
-            widget(app, "checkbox", "Enable angle-resolved map").check().run()
+            app.run()
             assert not app.exception
             metadata = exported.call_args.args[3]
             assert "background" not in metadata["settings"]

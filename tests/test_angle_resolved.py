@@ -107,7 +107,6 @@ def test_angle_resolved_app_and_exports(tmp_path):
     with patch("angle_resolved.export_map", wraps=export_map) as exported:
         app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=45).run()
         next(w for w in app.text_input if w.label == "Data folder").set_value(str(tmp_path)).run()
-        app.checkbox(key="angle_enabled").check().run()
         assert not app.exception and not app.error
         for label, value in [("Row min (px)", 1), ("Row max (px)", 4),
                              ("Column min (py)", 3), ("Column max (py)", 8)]:
@@ -141,7 +140,6 @@ def test_map_roi_survives_switching_different_planes(tmp_path):
     np.save(tmp_path / "b_T1000K.npy", np.ones((5, 3, 5)))
     app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=45).run()
     next(w for w in app.text_input if w.label == "Data folder").set_value(str(tmp_path)).run()
-    app.checkbox(key="angle_enabled").check().run()
     sources = app.selectbox(key="angle_source").options
     next(w for w in app.number_input if w.label == "Row min (px)").set_value(2)
     next(w for w in app.number_input if w.label == "Column max (py)").set_value(8)

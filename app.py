@@ -19,7 +19,8 @@ from eels_core import (
     detector_offsets_from_click, energy_loss_axis_mev, export_csv, export_npz,
     extract_spectrum, gaussian_broaden_spectrum, inspect_scan, nearest_energy_index,
 )
-from cache_layer import cached_diffraction_pattern, PNG_DPI_OPTIONS
+from cache_layer import (cached_diffraction_pattern, PNG_DPI_OPTIONS, spectrum_from_zarr_tile,
+                         cached_spectrum_tile, spectrum_tile_tasks)
 from scan_map_view import render_scan_map
 from detector_click import register_detector_click_bridge
 from angle_resolved import render_angle_resolved
@@ -28,6 +29,8 @@ from equal_height import register_equal_height
 from background_core import BackgroundState, config_caption, corrected_display, input_fingerprints
 from background_exports import background_csv, background_npz
 from background_view import render_background
+from folder_browser import render_folder_input
+from scan_sources import discover_scans, resolve_data_directory, scan_revision
 
 ROOT = Path(__file__).resolve().parent
 detector_click_bridge = register_detector_click_bridge()
@@ -71,20 +74,22 @@ h1 {{letter-spacing: -0.045em;}}
 
 @st.cache_data(show_spinner=False, max_entries=128)
 def cached_spectrum(info, dummy, probe_x, probe_y, radius, offset_px, offset_py, normalize):
+    if info.chunks is not None and len(info.shape) == 6:
+        return spectrum_from_zarr_tile(info, dummy, probe_x, probe_y, radius,
+                                       offset_px, offset_py, normalize)
     return extract_spectrum(info, dummy=dummy, probe_x=probe_x, probe_y=probe_y,
                             radius=radius, offset_px=offset_px, offset_py=offset_py,
                             normalize_3d=normalize)
 
 
 @st.cache_data(show_spinner=False, max_entries=256)
-def _cached_inspect(path_str, mtime_ns, size):
+def _cached_inspect(path_str, mtime_ns, size, revision):
     return inspect_scan(path_str)
 
 
 def inspect_scan_cached(path):
-    """Skip re-parsing a scan's header when its mtime/size haven't changed."""
-    stat = path.stat()
-    return _cached_inspect(str(path), stat.st_mtime_ns, stat.st_size)
+    """Invalidate Zarr caches when metadata or any chunk file changes."""
+    return _cached_inspect(str(path), *scan_revision(path))
 
 
 @st.cache_data(show_spinner=False, max_entries=8)
@@ -104,12 +109,20 @@ def cached_notebook_npy(curves):
     return buffer.getvalue()
 
 
+def spectrum_display_intensity(curve, mode, corrected=False):
+    """Apply display scaling without changing the stored or exported spectrum."""
+    if mode == "energy_squared":
+        return curve["intensity"] * np.square(curve["energy"])
+    transform = corrected_display if corrected else display_intensity
+    return transform(curve["intensity"], mode)
+
+
 @st.cache_data(show_spinner=False, max_entries=8)
 def figure_downloads(curves, mode, x_limits, normalize, dpi=300, corrected=False):
     fig, ax = plt.subplots(figsize=(10, 5), layout="constrained")
     for curve in curves:
         style = curve["style"]
-        ax.plot(curve["energy"], (corrected_display if corrected else display_intensity)(curve["intensity"], mode),
+        ax.plot(curve["energy"], spectrum_display_intensity(curve, mode, corrected),
                 label=curve["label"], color=style["color"], linewidth=style["width"],
                 linestyle=LINE_STYLES[style["line_style"]][1])
     ax.set_xlabel("Energy loss (meV)")
@@ -130,6 +143,8 @@ def intensity_label(mode, normalize, corrected=False):
     base = "Normalized detector intensity" if normalize else "Detector intensity"
     if corrected:
         base = "Background-subtracted " + base.lower()
+    if mode == "energy_squared":
+        return f"{base} × E² (meV²)"
     return f"log10({base.lower()})" if mode == "log10" else base
 
 
@@ -165,23 +180,20 @@ view = st.radio("Visualization", ["Spectra & detector", "2D scan map"], horizont
 
 with st.sidebar:
     st.header("Your scans")
-    folder = st.text_input("Data folder", value=str(ROOT), help="Local folder on the computer running this app.")
+    folder = render_folder_input(ROOT)
     st.button("Refresh files", use_container_width=True, on_click=_cached_inspect.clear,
              help="Force every file to be re-inspected, in case one changed without its size or modified time changing.")
     try:
-        directory = Path(folder).expanduser().resolve()
-        if not directory.is_dir():
-            raise ValueError("Enter an existing folder")
-        available = sorted(directory.glob("*.npy"))
+        directory = resolve_data_directory(folder)
+        available = discover_scans(directory)
     except (OSError, ValueError) as exc:
         st.error(str(exc))
         st.stop()
     if not available:
-        st.info("No .npy files in this folder. Enter a folder containing your scans.")
+        st.info("No NumPy or Zarr scans in this folder. Choose a folder containing .npy files "
+                "or Zarr arrays (.zarr/.zarray), or select a Zarr array directory directly.")
         st.stop()
-    # Inspection reads only headers; arrays with unsupported dimensions are excluded.
-    # Cached per (path, mtime, size), so an unchanged file's header is parsed
-    # once rather than on every rerun.
+    # Inspection reads metadata only. Zarr revisions include nested chunk stats.
     scans, rejected = {}, []
     for path in available:
         try:
@@ -202,6 +214,13 @@ with st.sidebar:
         st.info("Select at least one scan to get started.")
         st.stop()
     infos = [scans[p] for p in selected]
+    for info in infos:
+        if info.chunks is not None:
+            chunk_bytes = int(np.prod(info.chunks)) * np.dtype(info.dtype).itemsize
+            if chunk_bytes > 256 * 2**20:
+                st.warning(f"{Path(info.path).name}: each Zarr chunk expands to "
+                           f"{chunk_bytes / 2**30:.2f} GiB. Loading requires additional "
+                           "memory for decompression and may be slow.")
     with st.expander("Curve labels", expanded=False):
         labels = [st.text_input(Path(p).name, value=suggested_label(p), key=f"label:{p}").strip()
                   for p in selected]
@@ -261,11 +280,30 @@ with st.sidebar:
         probe_positions = [(0, 0)]
         st.caption("3D diffraction data · one spectrum per file.")
 
+    tile_tasks = spectrum_tile_tasks(infos)
+    if tile_tasks and len(tile_tasks) <= 256:
+        if st.button("Prepare all Zarr probe spectra",
+                     help="Read all selected 6D Zarr scans once for the current detector. "
+                          "Afterwards, any probe position can reuse the prepared spectra. "
+                          "Large scans can take several minutes. Changing detector geometry "
+                          "or restarting the app requires preparation again."):
+            progress = st.progress(0.0, text="Preparing probe spectra…")
+            try:
+                for index, (info, tx, ty) in enumerate(tile_tasks, 1):
+                    cached_spectrum_tile(info, dummy, tx, ty, radius, offset_px, offset_py)
+                    progress.progress(index / len(tile_tasks),
+                                      text=f"Prepared {index}/{len(tile_tasks)} probe groups")
+                st.success("All Zarr probe spectra prepared for this detector.")
+            except (OSError, ValueError, IndexError, EOFError) as exc:
+                st.error(f"Could not prepare all spectra: {exc}")
+            finally:
+                progress.empty()
+
     with st.expander("Energy calibration", expanded=True):
         timestep = st.number_input("Simulation time step (fs)", min_value=0.000001,
                                    value=2.5, step=0.5, format="%.6f")
         stride = st.number_input("Sampling stride", min_value=1, value=3, step=1)
-        st.caption("Confirm these values for your simulation. .npy arrays do not store time calibration. Applied to every selected file.")
+        st.caption("Confirm these values for your simulation. Time calibration is not inferred from NumPy or Zarr input. Applied to every selected scan.")
         ordering = st.selectbox("Input energy ordering", ["FFT-shifted (notebook default)", "Unshifted FFT"])
 
     with st.expander("Gaussian broadening", expanded=True):
@@ -319,7 +357,7 @@ resolutions = sorted({round(float(c["energy"][1] - c["energy"][0]), 6) for c in 
 metrics[3].metric("Resolution (meV)", " / ".join(f"{v:.3f}" for v in resolutions) or "—")
 
 background_state = st.session_state.setdefault("background_state", BackgroundState())
-revisions = {info.path: (info.mtime_ns, info.size) for info in infos}
+revisions = {info.path: (info.mtime_ns, info.size, info.revision) for info in infos}
 background_state.source_revisions = revisions
 had_background = bool(background_state.applied_results)
 if background_state.sync_inputs(input_fingerprints(curves, settings, revisions)):
@@ -341,8 +379,11 @@ with spectrum_tab:
     background_state.signal = signal
     corrected = signal == "Corrected"
     controls = st.columns([1.3, 1, 1])
-    mode_label = controls[0].selectbox("Intensity display", ["log10", "Linear"])
-    mode = "log10" if mode_label == "log10" else "linear"
+    display_modes = {"log10": "log10", "Linear": "linear", "Intensity × E²": "energy_squared"}
+    mode_label = controls[0].selectbox(
+        "Intensity display", list(display_modes),
+        help="Intensity × E² multiplies each intensity by its energy loss squared (in meV²). Applies to the plot and figure downloads.")
+    mode = display_modes[mode_label]
     x_min = controls[1].number_input("Energy min (meV)", value=-150.0, step=10.0)
     x_max = controls[2].number_input("Energy max (meV)", value=150.0, step=10.0)
     if x_min >= x_max:
@@ -383,12 +424,12 @@ with spectrum_tab:
     fig = go.Figure()
     for curve in shown_curves:
         style = curve["style"]
-        fig.add_trace(go.Scatter(x=curve["energy"], y=(corrected_display if corrected else display_intensity)(curve["intensity"], mode),
+        fig.add_trace(go.Scatter(x=curve["energy"], y=spectrum_display_intensity(curve, mode, corrected),
                                  name=curve["label"], mode="lines", connectgaps=False,
                                  line=dict(color=style["color"], width=style["width"],
                                            dash=LINE_STYLES[style["line_style"]][0]),
                                  hovertemplate="%{y:.6g}<extra>%{fullData.name}</extra>"))
-    fig.update_layout(height=440, margin=dict(l=20, r=20, t=15, b=20), template="plotly_white",
+    fig.update_layout(height=440, margin=dict(l=20, r=20, t=15, b=20), template="plotly_white", dragmode="pan",
                       paper_bgcolor="white", plot_bgcolor="white", hovermode="x unified" if show_hover else False,
                       legend=dict(orientation="h", y=-0.2, x=0), uirevision="spectrum",
                       meta=dict(eels_render_revision=st.session_state["spectrum_render_revision"]),
@@ -396,7 +437,7 @@ with spectrum_tab:
                       xaxis=dict(title="Energy loss (meV)", range=x_limits, zerolinecolor="#bdcbd4",
                                  gridcolor="#EAF0F7", hoverformat=".4f", uirevision=json.dumps(x_limits)),
                       yaxis=dict(title=intensity_label(mode, normalize, corrected), gridcolor="#EAF0F7",
-                                 uirevision="yaxis"))
+                                 uirevision=f"yaxis:{mode}"))
     workspace_row = st.container(key="workspace_row")
     with workspace_row:
         detector_col, plot_col = st.columns([1, 2], gap="medium") if show_detector else (None, st.container())
@@ -412,6 +453,8 @@ with spectrum_tab:
                        "isolate it (hide all others) · double-click again to restore all.")
             if sigma_mev > 0:
                 st.caption(f"Gaussian broadening active: σ = {sigma_mev:g} meV (FWHM = {sigma_mev * np.sqrt(8 * np.log(2)):.3f} meV).")
+            if mode == "energy_squared":
+                st.caption("Energy-squared display: I(E) × E², with E in meV. Data exports retain unscaled linear intensities.")
             if corrected and mode == "log10":
                 st.caption("Nonpositive corrected samples are masked in log10 display (gaps are not connected). Signed linear residuals remain in data exports.")
             if not any(np.any((c["energy"] >= x_min) & (c["energy"] <= x_max)) for c in curves):
@@ -460,7 +503,7 @@ with spectrum_tab:
                     image.update_layout(width=content_side + margin["l"] + margin["r"],
                                         height=content_side + margin["t"] + margin["b"],
                                         template="plotly_white", margin=margin, paper_bgcolor="white",
-                                        plot_bgcolor="white", uirevision="detector",
+                                        plot_bgcolor="white", uirevision="detector", dragmode="pan",
                                         meta=dict(eels_render_revision=st.session_state["detector_render_revision"]),
                                         xaxis=dict(range=[-0.5, pattern.shape[1] - 0.5], uirevision=axis_revision,
                                                   visible=False),
@@ -473,7 +516,7 @@ with spectrum_tab:
                     axis_scaling(key="detector_axis_scaling", height=0, data=dict(
                         selector=".st-key-detector_click_target .js-plotly-plot",
                         viewport_key="eels.detector.viewport"))
-                    preview_id = json.dumps([info.path, info.mtime_ns, curve["dummy"], curve["probe_x"], curve["probe_y"], raw_index])
+                    preview_id = json.dumps([info.path, info.mtime_ns, info.revision, curve["dummy"], curve["probe_x"], curve["probe_y"], raw_index])
                     st.session_state["detector_preview_context"] = dict(preview_id=preview_id, shape=pattern.shape,
                                                                        selected_shapes=[i.shape[-2:] for i in infos])
                     # Renew the bridge after each Streamlit redraw, including manual edits.

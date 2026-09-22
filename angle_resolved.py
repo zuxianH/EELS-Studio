@@ -81,8 +81,6 @@ def map_figures(energy, pixels, shown, title, xlabel, color_label, energy_limits
 
 def render_angle_resolved(curves, scans, settings):
     st.caption("Draw a rectangle on the diffraction image to form an energy-versus-pixel map. The selected strip is summed across one detector direction.")
-    if not st.checkbox("Enable angle-resolved map", value=True, key="angle_enabled"):
-        return
     # Stable identifiers prevent a scan reorder from silently selecting another probe.
     choices = {curve_identity_key(c): c for c in curves}
     if st.session_state.get("angle_source") not in choices:
@@ -175,7 +173,7 @@ def render_angle_resolved(curves, scans, settings):
             st.plotly_chart(preview, key="angle_diffraction", use_container_width=True,
                             config={"displaylogo": False, "modeBarButtonsToAdd": ["drawrect"],
                                     "edits": {"shapePosition": True}})
-        preview_id = json.dumps([selected, info.mtime_ns, shape, raw_index])
+        preview_id = json.dumps([selected, info.mtime_ns, info.revision, shape, raw_index])
         st.session_state["angle_rectangle_context"] = dict(preview_id=preview_id, shape=shape,
                                                            bound_keys=bound_keys)
         bridge = components.component("eels_angle_rectangle", js=_RECTANGLE_SELECT_JS)

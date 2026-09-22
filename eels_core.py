@@ -5,7 +5,7 @@ import json
 import io
 import csv
 
-from scan_reader import ScanReader
+from scan_sources import open_scan_reader, scan_revision
 
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
@@ -18,6 +18,8 @@ class ScanInfo:
     dtype: str
     mtime_ns: int
     size: int
+    revision: str = ""
+    chunks: tuple[int, ...] | None = None
 
     @property
     def canonical_shape(self):
@@ -29,9 +31,10 @@ class ScanInfo:
 
 def inspect_scan(path):
     path = Path(path).expanduser().resolve()
-    scan = ScanReader(path)
-    stat = path.stat()
-    return ScanInfo(str(path), scan.shape, str(scan.dtype), stat.st_mtime_ns, stat.st_size)
+    scan = open_scan_reader(path)
+    mtime_ns, size, revision = scan_revision(path)
+    return ScanInfo(str(path), scan.shape, str(scan.dtype), mtime_ns, size,
+                    revision, getattr(scan, "chunks", None))
 
 
 def energy_loss_axis_mev(chunk, timestep_fs=2.5, stride=3):
@@ -122,10 +125,9 @@ def gaussian_broaden_spectrum(energy_mev, intensity, sigma_mev=0.0):
 
 
 def _open_scan(info):
-    stat = Path(info.path).stat()
-    if (stat.st_mtime_ns, stat.st_size) != (info.mtime_ns, info.size):
+    if scan_revision(info.path) != (info.mtime_ns, info.size, info.revision):
         raise ValueError("File changed on disk; refresh the file list")
-    return ScanReader(info.path)
+    return open_scan_reader(info.path)
 
 
 def _validate_index(name, value, length):
@@ -181,6 +183,46 @@ def extract_spectrum(info, *, dummy=0, probe_x=0, probe_y=0, radius=20,
     if not np.isfinite(spectrum).all():
         raise ValueError("Integrated intensity overflowed; check the input data")
     return spectrum
+
+
+def extract_spectrum_tile(info, *, dummy, tile_x, tile_y, radius=20,
+                          offset_px=0, offset_py=0):
+    """Integrate all probes in one Zarr spatial chunk in a single traversal.
+
+    Keep only small raw spectra, normalization totals, and per-probe validity.
+    Decode each intersecting storage chunk once, and reduce it in bounded pieces.
+    Invalid neighboring probes must not prevent extraction of a valid probe.
+    """
+    if len(info.shape) != 6 or info.chunks is None:
+        raise ValueError("Spectrum tiles require a 6D Zarr array")
+    _validate_index("Dummy", dummy, info.shape[0])
+    cx, cy = info.chunks[2:4]
+    _validate_index("Tile x", tile_x, (info.shape[2] + cx - 1) // cx)
+    _validate_index("Tile y", tile_y, (info.shape[3] + cy - 1) // cy)
+    x0, y0 = tile_x * cx, tile_y * cy
+    x1, y1 = min(x0 + cx, info.shape[2]), min(y0 + cy, info.shape[3])
+    mask = circular_detector_mask(info.shape[-2:], detector_center(info, offset_px, offset_py), radius)
+    spectra = np.zeros((info.shape[1], x1 - x0, y1 - y0), dtype=np.float64)
+    totals = np.zeros(spectra.shape[1:], dtype=np.float64)
+    finite = np.ones(spectra.shape[1:], dtype=bool)
+    key = (slice(dummy, dummy + 1), slice(None), slice(x0, x1), slice(y0, y1),
+           slice(None), slice(None))
+    with _open_scan(info) as reader:
+        for bounds, block in reader.iter_chunks(key):
+            data = block[dummy - bounds[0].start]
+            detector_mask = mask[bounds[4], bounds[5]]
+            bytes_per_energy = int(np.prod(data.shape[1:])) * data.dtype.itemsize
+            step = max(1, min(32, 16 * 2**20 // bytes_per_energy))
+            for start in range(0, data.shape[0], step):
+                stop = min(start + step, data.shape[0])
+                part = data[start:stop]
+                energy = slice(bounds[1].start + start, bounds[1].start + stop)
+                spectra[energy] += part[..., detector_mask].sum(axis=-1, dtype=np.float64)
+                totals += part.sum(axis=(0, 3, 4), dtype=np.float64)
+                finite &= np.isfinite(part).all(axis=(0, 3, 4))
+                del part
+            del data, block
+    return spectra, totals, finite
 
 
 def diffraction_pattern(info, energy_index, *, dummy=0, probe_x=0, probe_y=0):
